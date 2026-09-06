@@ -42,19 +42,20 @@ def find_target_index(array, percentile: float):
         return len(array) - 1, np.nanmax(array)
 
 
-def extract_pop_S2_models(layout, algo, exp, env, percentile=0.8):
+def extract_pop_S2_models(layout, algo, exp, env, percentile=0.8, replicates=False):
     logger.info(f"exp {exp}")
     api = wandb.Api(timeout=60)
     if "overcooked" in env.lower():
         layout_config = "config.layout_name"
     else:
         layout_config = "config.scenario_name"
+    drop_tags = ["hidden"] if replicates else ["hidden", "unused"]
     filters = {
         "$and": [
             {"config.experiment_name": exp},
             {layout_config: layout},
             {"state": "finished"},
-            {"tags": {"$nin": ["hidden", "unused"]}},
+            {"tags": {"$nin": drop_tags}},
         ]
     }
     logger.info(f"{wandb_name}/{env}")
@@ -74,20 +75,50 @@ def extract_pop_S2_models(layout, algo, exp, env, percentile=0.8):
     # train_morl_stage_2.sh left a second full run per seed, and the arm ended up
     # with checkpoints picked from a 5-point history while every other arm used a
     # 79-point one. Tag the runs you do not want with 'unused' -- the filter above
-    # already drops those.
+    # drops those unless --replicates is set, which keeps every run instead. Prefer
+    # --replicates when the repeats are genuine reruns of the same config: tagging
+    # picks a subsample by hand, and doing that per-arm biases an arm comparison.
     seeds = [r.config["seed"] for r in runs]
     dupes = sorted({s for s in seeds if seeds.count(s) > 1})
-    if dupes:
+    if dupes and not replicates:
         detail = ", ".join(
             f"{r.id}(seed={r.config['seed']})" for r in runs if r.config["seed"] in dupes
         )
         raise RuntimeError(
             f"{exp}: multiple finished runs for seed(s) {dupes}: {detail}. "
-            "Tag the unwanted ones 'unused' in W&B and re-run."
+            "Tag the unwanted ones 'unused' in W&B and re-run, or pass "
+            "--replicates to keep them all as separate checkpoints."
         )
+
+    # --replicates: keep every finished run instead of demanding one per seed.
+    #
+    # PPO on GPU is not bit-deterministic, so re-running a seed gives a genuinely
+    # different agent rather than the same one twice. Those repeats are extra
+    # samples, and collapsing them onto `{seed}.pt` throws that away -- worse,
+    # resolving the collision by tagging some 'unused' is a *selection*, and on
+    # unident_s the tagged-off half of bench_sp happened to be the stronger one
+    # (dropped mean 190.0 against a kept 162.8) while bench_morl kept nearly all
+    # of its runs. That is a biased subsample sitting under an arm comparison.
+    #
+    # The oldest run of a seed keeps `{seed}.pt` so existing pools and ymls do
+    # not shift underneath anything; later ones become `{seed}r2.pt`, `{seed}r3.pt`.
+    # `gen_crossplay_yml.py --s2_arm_seeds` takes these as labels.
+    labels = {}
+    if replicates:
+        by_seed = {}
+        for r in runs:
+            by_seed.setdefault(r.config["seed"], []).append(r)
+        for seed, rs in by_seed.items():
+            for n, r in enumerate(sorted(rs, key=lambda x: x.created_at)):
+                labels[r.id] = f"{seed}" if n == 0 else f"{seed}r{n + 1}"
+        logger.info(
+            f"{exp}: {len(runs)} finished runs over {len(by_seed)} seeds -> "
+            f"labels {sorted(labels.values())}"
+        )
+
     for i, run_id in enumerate(run_ids):
         run = runs[i]
-        seed = run.config["seed"]
+        seed = labels.get(run.id, run.config["seed"])
         if run.state == "finished":
             logger.info(f"Run: {run_id} Seed: {seed}")
             files = run.files()
@@ -141,6 +172,17 @@ if __name__ == "__main__":
         "the pipeline's fixed `{algo}-S2-s{size}` names -- the MORL arms, for "
         "instance, are logged as `fcp-S2-bench_morl_ad`.",
     )
+    parser.add_argument(
+        "--replicates",
+        action="store_true",
+        help="Keep every finished run rather than requiring one per seed. Repeats "
+        "of a seed are separate samples (PPO on GPU is not bit-deterministic), so "
+        "the oldest keeps `{seed}.pt` and the rest become `{seed}r2.pt` etc. Also "
+        "stops excluding runs tagged 'unused', since that tag is how this "
+        "collision was resolved before -- and resolving it that way selects a "
+        "subsample rather than a random one. Pass the labels straight to "
+        "`gen_crossplay_yml.py --s2_arm_seeds`.",
+    )
 
     args = parser.parse_args()
     layout = args.layout
@@ -154,6 +196,7 @@ if __name__ == "__main__":
         "random0_m",
         "random1_m",
         "random3_m",
+        "unident_s_m",
         "academy_3_vs_1_with_keeper",
         "all",
     ]
@@ -217,7 +260,9 @@ if __name__ == "__main__":
             while i < len(ALG_EXPS[algo]):
                 exp = ALG_EXPS[algo][i]
                 try:
-                    extract_pop_S2_models(l, algo, exp, args.env, percentile)
+                    extract_pop_S2_models(
+                        l, algo, exp, args.env, percentile, args.replicates
+                    )
                 except Exception as e:
                     logger.error(e)
                     # The retry exists for flaky W&B calls, but without a bound a

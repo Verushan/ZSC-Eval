@@ -184,9 +184,12 @@ def main():
     parser.add_argument(
         "--s2_arm_seeds",
         nargs="+",
-        type=int,
+        type=str,
         default=None,
-        help=f"Stage-2 seeds per arm (default {S2_ARM_SEEDS}).",
+        help=f"Stage-2 seed labels per arm (default {S2_ARM_SEEDS}). Strings, not "
+        "ints, because `extract_S2_models.py --replicates` names a seed's repeat "
+        "runs `1r2`, `1r3` and so on; the label is only ever interpolated into "
+        "the checkpoint filename and the pool entry name.",
     )
     parser.add_argument(
         "--s2_suffix",
