@@ -42,6 +42,7 @@ from train.train_sp import parse_args  # noqa: E402
 
 from zsceval.config import get_config  # noqa: E402
 from zsceval.envs.overcooked.Overcooked_Env import Overcooked  # noqa: E402
+from zsceval.envs.overcooked_new.Overcooked_Env import Overcooked as Overcooked_new  # noqa: E402
 from zsceval.overcooked_config import OLD_LAYOUTS  # noqa: E402
 
 POLICY_POOL_DIR = os.getenv("POLICY_POOL")
@@ -77,9 +78,14 @@ def build(layout, extra):
     ] + extra
     all_args = parse_args(argv, get_config())
 
+    # The multi-recipe layouts are a different env package with differently
+    # shaped observations, so the class has to follow the version the same way
+    # `train_sp.make_train_env` picks it -- building a `*_m` layout through the
+    # old class silently writes a pickle with the wrong spaces.
+    env_cls = Overcooked if version == "old" else Overcooked_new
     # Overcooked's constructor takes a run_dir only to write layout artifacts it
     # does not write on this path; the env is discarded after its spaces are read.
-    env = Overcooked(all_args, run_dir=osp.dirname(osp.abspath(__file__)))
+    env = env_cls(all_args, run_dir=osp.dirname(osp.abspath(__file__)))
     share_obs_space = (
         env.share_observation_space[0]
         if all_args.use_centralized_V

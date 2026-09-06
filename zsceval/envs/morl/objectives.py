@@ -213,6 +213,49 @@ def Plating(scale: float = 1.0) -> EventCountObjective:
     )
 
 
+def RecipeQuality(scale: float = 1.0) -> EventCountObjective:
+    """Recipe judgement: ingredients potted towards a recipe worth cooking.
+
+    Multi-recipe only. `resolve_interacts` in the new MDP grades every
+    `PLACEMENT_IN_POT` against the recipes still reachable from the pot's
+    contents -- `optimal_placement` when it keeps the best recipe alive,
+    `viable_placement` when the result is still deliverable, and
+    `catastrophic_placement` / `useless_placement` when it is not. The old
+    single-recipe env cannot grade anything, because there is only one recipe,
+    which is why this objective has no counterpart in the `default` preset.
+
+    Only `optimal_placement` is counted. The four grades are raised by four
+    independent `if`s rather than an `elif` chain, so a placement that is both
+    optimal and viable increments both counters -- summing the two would score
+    a good placement twice and make the objective exceed `ingredient_prep`,
+    which counts the same placements once each.
+    """
+    return EventCountObjective(
+        name="recipe_quality",
+        event_keys=("optimal_placement",),
+        description="Pot placements that keep the best reachable recipe alive.",
+        scale=scale,
+    )
+
+
+def RecipeValue(scale: float = 1.0) -> EventCountObjective:
+    """Recipe ambition: delivering the larger, higher-priced order.
+
+    A size-three order pays more but takes longer to assemble than a size-two,
+    so `task_completion` (which counts deliveries regardless of price) and this
+    objective genuinely conflict: maximising one costs the other. That trade-off
+    is the reason the multi-recipe layouts are worth running -- a scalar shaped
+    reward has to pick a point on it when the reward is written, while a weight
+    vector can move along it.
+    """
+    return EventCountObjective(
+        name="recipe_value",
+        event_keys=("deliver_size_three_order",),
+        description="Deliveries of the larger, higher-priced order.",
+        scale=scale,
+    )
+
+
 class CounterHandoff(Objective):
     """Coordination quality: objects passed between agents via a counter.
 
@@ -432,12 +475,27 @@ OBJECTIVE_REGISTRY: Dict[str, Callable[[], Objective]] = {
     "ingredient_prep": IngredientPrep,
     "plating": Plating,
     "coordination": CounterHandoff,
+    "recipe_quality": RecipeQuality,
+    "recipe_value": RecipeValue,
 }
 
 # Named presets
 OBJECTIVE_SETS: Dict[str, List[str]] = {
     "default": ["task_completion", "ingredient_prep", "plating", "coordination"],
     "task_only": ["task_completion"],
+    # Multi-recipe (`*_m`) layouts only. `default` plus the two objectives the
+    # single-recipe env has no counters for. The events behind these are only
+    # ever non-zero in `envs/overcooked_new`, so using this preset on an old
+    # layout is not an error but leaves two components pinned at 0 -- which
+    # the adaptive weight update will then happily pour weight into.
+    "recipe": [
+        "task_completion",
+        "ingredient_prep",
+        "plating",
+        "coordination",
+        "recipe_quality",
+        "recipe_value",
+    ],
 }
 
 
