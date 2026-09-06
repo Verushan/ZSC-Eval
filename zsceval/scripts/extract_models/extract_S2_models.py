@@ -42,7 +42,9 @@ def find_target_index(array, percentile: float):
         return len(array) - 1, np.nanmax(array)
 
 
-def extract_pop_S2_models(layout, algo, exp, env, percentile=0.8, replicates=False):
+def extract_pop_S2_models(
+    layout, algo, exp, env, percentile=0.8, replicates=False, checkpoint="auto"
+):
     logger.info(f"exp {exp}")
     api = wandb.Api(timeout=60)
     if "overcooked" in env.lower():
@@ -139,9 +141,29 @@ def extract_pop_S2_models(layout, algo, exp, env, percentile=0.8, replicates=Fal
                 int(f.name.split("_")[-1].split(".pt")[0]) for f in actor_pts
             ]
             actor_versions.sort()
-            version = find_nearest(actor_versions, max_ep_sparse_r_step)
+            auto_version = find_nearest(actor_versions, max_ep_sparse_r_step)
+            # `auto` is the upstream rule: walk past the peak of the training
+            # curve and take the checkpoint nearest the `percentile` value after
+            # it, on the theory that the peak is noise and what follows is the
+            # settled policy. In practice it is very nearly a no-op -- on the 16
+            # unident_s and random0 stage-2 runs it chose the final checkpoint
+            # for 15, and the one exception (s2_bench_sp_s1r2, chosen at 460800
+            # of 1996800) scored 156.9 against an arm mean of 156.4.
+            #
+            # `final` removes the choice altogether. It is worth preferring for
+            # a reported result not because `auto` is wrong but because the
+            # metric it ranks on -- either-fcp_adaptive-ep_sparse_r, measured
+            # against the *training* population -- does not predict zero-shot
+            # return (Spearman +0.02 over the unident_s agents). A selection
+            # rule keyed on a metric unrelated to the reported one is a degree
+            # of freedom with nothing to justify it, and the honest alternative
+            # is not a better metric: selecting on held-out ZSC would be
+            # choosing the model on the evaluation set.
+            version = actor_versions[-1] if checkpoint == "final" else auto_version
+            note = "" if version == auto_version else f" (auto would pick {auto_version})"
             logger.info(
-                f"actor version {version} / {actor_versions[-1]}, sparse_r {max_ep_sparse_r:.3f}/{np.nanmax(ep_sparse_r):.3f}"
+                f"actor version {version} / {actor_versions[-1]} [{checkpoint}]{note}, "
+                f"sparse_r {max_ep_sparse_r:.3f}/{np.nanmax(ep_sparse_r):.3f}"
             )
             ckpt = run.file(f"{policy_name}/actor_periodic_{version}.pt")
             tmp_dir = f"tmp/{layout}/{exp}"
@@ -182,6 +204,20 @@ if __name__ == "__main__":
         "collision was resolved before -- and resolving it that way selects a "
         "subsample rather than a random one. Pass the labels straight to "
         "`gen_crossplay_yml.py --s2_arm_seeds`.",
+    )
+
+    parser.add_argument(
+        "--checkpoint",
+        choices=("auto", "final"),
+        default="auto",
+        help="Which checkpoint to take from each run. 'auto' keeps the "
+        "upstream rule: the checkpoint nearest the -p percentile of the "
+        "training curve after its peak. 'final' takes the last one and "
+        "removes the choice, which is preferable for a reported result "
+        "because the metric 'auto' ranks on is measured against the "
+        "training population and does not predict zero-shot return. In "
+        "practice the two agree: 'auto' picked the final checkpoint for 15 "
+        "of 16 stage-2 runs.",
     )
 
     args = parser.parse_args()
@@ -261,7 +297,8 @@ if __name__ == "__main__":
                 exp = ALG_EXPS[algo][i]
                 try:
                     extract_pop_S2_models(
-                        l, algo, exp, args.env, percentile, args.replicates
+                        l, algo, exp, args.env, percentile,
+                        args.replicates, args.checkpoint,
                     )
                 except Exception as e:
                     logger.error(e)
