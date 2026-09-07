@@ -86,6 +86,7 @@ def entries(
     layout,
     arm_seeds=None,
     peak_arms=None,
+    arms=None,
     s2_arms=None,
     s2_arm_seeds=None,
     s2_suffix="",
@@ -97,7 +98,7 @@ def entries(
     """(name, policy_config, actor_path) for every policy in the pool."""
     out = []
     peak_arms = PEAK_ARMS if peak_arms is None else peak_arms
-    for arm in ARMS:
+    for arm in arms or ARMS:
         for seed in arm_seeds or ARM_SEEDS:
             tags = ["final"] + (["peak"] if arm in peak_arms else [])
             for tag in tags:
@@ -165,6 +166,14 @@ def main():
         type=int,
         default=None,
         help=f"Seeds trained for each arm (default {ARM_SEEDS}).",
+    )
+    parser.add_argument(
+        "--arms",
+        nargs="+",
+        default=None,
+        help=f"Stage-1 arms to include (default {ARMS}). Needed for the anchored "
+        "re-baseline, whose arms are named bench_morl-anc and so on to keep them "
+        "out of the run set they supersede.",
     )
     parser.add_argument(
         "--peak_arms",
@@ -264,17 +273,20 @@ def main():
 
     written, skipped = [], []
     with open(yml_path, "w", encoding="utf-8") as yml:
+        # Keywords, not positions: `arms` was inserted into the signature and a
+        # positional call would silently shift s2_arms into it.
         for name, config, actor in entries(
             args.layout,
-            args.arm_seeds,
-            args.peak_arms,
-            args.s2_arms,
-            args.s2_arm_seeds,
-            args.s2_suffix,
-            args.heldout,
-            hsp_partners,
-            args.hsp_exp,
-            args.hsp_tags,
+            arm_seeds=args.arm_seeds,
+            peak_arms=args.peak_arms,
+            arms=args.arms,
+            s2_arms=args.s2_arms,
+            s2_arm_seeds=args.s2_arm_seeds,
+            s2_suffix=args.s2_suffix,
+            heldout=args.heldout,
+            hsp_partners=hsp_partners,
+            hsp_exp=args.hsp_exp,
+            hsp_tags=args.hsp_tags,
         ):
             if not osp.exists(osp.join(POLICY_POOL_DIR, actor)):
                 if args.skip_missing:
