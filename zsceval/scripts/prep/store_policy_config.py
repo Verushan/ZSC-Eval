@@ -60,6 +60,16 @@ CONFIGS = {
 }
 
 
+def pid_flags(dim):
+    """Actor-side partner-id flags, matching what train_morl_stage_2.sh passes.
+
+    `dim` 0 is the raw scalar the critic already sees (one extra channel); a
+    positive `dim` one-hots the id over that many partners and must equal the
+    entry count of the population yml the ids came from.
+    """
+    return ["--use_agent_policy_id_obs", "--agent_policy_id_obs_dim", str(dim)]
+
+
 def build(layout, extra):
     """The 4-tuple `base_runner` pickles, without running a base_runner."""
     version = "old" if layout in OLD_LAYOUTS else "new"
@@ -103,6 +113,19 @@ def main():
         help="Report what would be written; do not touch the pool.",
     )
     parser.add_argument(
+        "--pid_obs_dim",
+        type=int,
+        default=None,
+        help="Also write configs for a partner-id-conditioned actor, as "
+        "`{mlp,rnn}_policy_config_pid{DIM}.pkl`. --use_agent_policy_id_obs "
+        "appends the partner's identity to the *actor's* observation, so a "
+        "ladder rung trained with it needs a wider observation than the shared "
+        "config describes -- which is why the rungs could not be cross-played. "
+        "0 is the raw scalar (one extra channel); a positive value one-hots the "
+        "id and must equal the entry count of the population yml the ids came "
+        "from. Repeatable via separate invocations, one per rung width.",
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Replace a config that already exists. Off by default: every policy "
@@ -113,9 +136,17 @@ def main():
 
     assert POLICY_POOL_DIR, "POLICY_POOL is unset; source .env first"
 
+    configs = dict(CONFIGS)
+    if args.pid_obs_dim is not None:
+        extra = pid_flags(args.pid_obs_dim)
+        configs = {
+            name.replace(".pkl", f"_pid{args.pid_obs_dim}.pkl"): base + extra
+            for name, base in CONFIGS.items()
+        }
+
     for layout in args.layouts:
         out_dir = osp.join(POLICY_POOL_DIR, layout, "policy_config")
-        for name, extra in CONFIGS.items():
+        for name, extra in configs.items():
             path = osp.join(out_dir, name)
             config = build(layout, extra)
             shapes = f"obs {config[1].shape} share_obs {config[2].shape} act {config[3]}"

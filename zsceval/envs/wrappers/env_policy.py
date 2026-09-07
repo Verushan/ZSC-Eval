@@ -30,6 +30,11 @@ class PartialPolicyEnv:
         self.policy = [None for _ in range(self.num_agents)]
         self.policy_name = [None for _ in range(self.num_agents)]
         self.mask = np.ones((self.num_agents, 1), dtype=np.float32)
+        # Width of the observation each frozen policy was built for, taken from
+        # its own policy_config pickle. The env emits one observation width for
+        # every seat, but the pool can hold policies trained at different widths
+        # -- see the slice in `step`.
+        self.policy_obs_width = [None for _ in range(self.num_agents)]
 
         self.observation_space, self.share_observation_space, self.action_space = (
             self.__env.observation_space,
@@ -91,13 +96,41 @@ class PartialPolicyEnv:
                     self.policy[a] = policy
                     self.policy_name[a] = policy_name
                     self.agent_policy_id[a] = policy_info["id"]
+                    obs_space = policy_config[1]
+                    self.policy_obs_width[a] = (
+                        obs_space.shape[-1] if getattr(obs_space, "shape", None) else None
+                    )
+
+    def _policy_obs(self, a):
+        """This seat's observation, trimmed to what its frozen policy expects.
+
+        The env emits one observation width for every seat, but a pool can hold
+        policies built at different widths. `--use_agent_policy_id_obs` appends
+        the partner's identity to the actor's observation as trailing channels,
+        so an agent trained with it needs a wider observation than every partner
+        already in the pool, which was trained without it. Without this the
+        partner-conditioning ladder cannot be cross-played at all: rungs 2 and 3
+        want 21 channels (or more, one-hot) while the shared
+        `mlp_policy_config.pkl` every frozen partner is rebuilt from has 20.
+
+        The identity channels are appended, so dropping the trailing ones gives
+        a partner exactly the observation it was trained on. Only extra channels
+        are ever removed -- a policy expecting *more* than the env provides is a
+        real mismatch and is left to fail at its own forward pass rather than be
+        padded with zeros the network never saw in training.
+        """
+        obs = self.obs[a]
+        want = self.policy_obs_width[a]
+        if want is not None and obs.shape[-1] > want:
+            return obs[..., :want]
+        return obs
 
     def step(self, actions):
         for a in range(self.num_agents):
             if self.policy[a] is not None:
                 assert actions[a] is None, "Expected None action for policy already set in parallel envs."
                 actions[a] = self.policy[a].step(
-                    np.array([self.obs[a]]),
+                    np.array([self._policy_obs(a)]),
                     [(0, 0)],
                     deterministic=False,
                     masks=np.array([self.mask[a]]),
