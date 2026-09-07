@@ -50,11 +50,51 @@ case "${arm}" in
     bench_morl_ad)
         morl_flags=(--use_morl --morl_objectives ${objectives} --morl_weights "0.25,0.25,0.25,0.25" --morl_adaptive_weights)
         ;;
+    bench_morl_div)
+        # Weights are per-seed; set inside the loop below.
+        morl_flags=()
+        ;;
     *)
-        echo "Unknown arm '${arm}'. Expected one of bench_sp bench_sparse bench_morl bench_morl_ad"
+        echo "Unknown arm '${arm}'. Expected one of bench_sp bench_sparse bench_morl bench_morl_ad bench_morl_div"
         exit 1
         ;;
 esac
+
+# bench_morl_div: one weight vector per population member.
+#
+# Every other MORL arm gives *every* seed the same w, so its population differs
+# only by random initialisation -- exactly like bench_sp. That is not using a
+# multi-objective reward to make a population diverse, it is using it to change
+# what the whole population optimises. This arm is the other thing: member i
+# gets its own w_i, so members differ in *what they are trying to do*.
+#
+# The design is deterministic rather than sampled, so a seed reproduces its
+# vector, and it is laid out as the three vertices of the simplex over the
+# non-task objectives followed by the three edge midpoints:
+#
+#   seed 1  prep          seed 4  prep + plating
+#   seed 2  plating       seed 5  prep + coordination
+#   seed 3  coordination  seed 6  plating + coordination
+#
+# task_completion is held at 0.25 in every member rather than being one of the
+# spread dimensions. A member with no task weight has no delivery signal at all,
+# and the failure mode that produces is already on record: random0's
+# bench_sparse population has the highest behavioural diversity of any arm
+# (0.70) and the lowest outcome diversity (0.00), because its members flail in
+# different ways and none of them score. Diversity is only worth having among
+# members that can actually cook.
+#
+# Every vector sums to 1.0, matching the L1 norm of bench_morl's uniform
+# 0.25x4, so the arms differ in the *direction* of w and not in reward scale --
+# which would otherwise act as a per-arm learning-rate change.
+DIV_WEIGHTS=(
+    "0.25,0.75,0,0"        # 1  ingredient_prep
+    "0.25,0,0.75,0"        # 2  plating
+    "0.25,0,0,0.75"        # 3  coordination
+    "0.25,0.375,0.375,0"   # 4  prep + plating
+    "0.25,0.375,0,0.375"   # 5  prep + coordination
+    "0.25,0,0.375,0.375"   # 6  plating + coordination
+)
 
 # Short-run budget. Unlike train_sp.sh, the entropy and reward-shaping horizons
 # are scaled to num_env_steps rather than left at the paper's 1e7: on a 2e6-step
@@ -85,6 +125,13 @@ echo "env ${env}, layout ${layout}, algo ${algo}, arm ${arm}, seeds ${seed_begin
 for seed in $(seq ${seed_begin} ${seed_max});
 do
     echo "=== ${arm} seed ${seed} ==="
+    if [ "${arm}" = "bench_morl_div" ]; then
+        # Seeds are 1-based; wrap so a seed range longer than the table still
+        # runs, rather than silently training with an empty --morl_weights.
+        w=${DIV_WEIGHTS[$(( (seed - 1) % ${#DIV_WEIGHTS[@]} ))]}
+        morl_flags=(--use_morl --morl_objectives ${objectives} --morl_weights "${w}")
+        echo "    w = ${w}"
+    fi
     python train/train_sp.py --env_name ${env} --algorithm_name ${algo} --experiment_name ${arm} \
     --layout_name ${layout} --num_agents ${num_agents} \
     --seed ${seed} --n_training_threads $TRAINING_THREADS --n_rollout_threads $ROLLOUT_THREADS \
