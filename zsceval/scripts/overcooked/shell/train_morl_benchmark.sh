@@ -40,6 +40,12 @@ fi
 # for the version credited only once a handed object is used -- the plain one
 # is farmable and six seeds found the loop, so new runs should use anchored.
 objectives=${OBJECTIVES:-default}
+# Appended to the W&B experiment_name only, never to the arm. Runs made under
+# a different objective set must not share an experiment_name with the ones
+# they replace: extract_sp_models filters on experiment_name, so a re-baseline
+# under `anchored` would otherwise be silently mixed with the `default` runs it
+# exists to supersede.
+exp_suffix=${EXP_SUFFIX:-}
 case "${arm}" in
     bench_sp)
         morl_flags=(--morl_objectives ${objectives})
@@ -135,7 +141,7 @@ do
         morl_flags=(--use_morl --morl_objectives ${objectives} --morl_weights "${w}")
         echo "    w = ${w}"
     fi
-    python train/train_sp.py --env_name ${env} --algorithm_name ${algo} --experiment_name ${arm} \
+    python train/train_sp.py --env_name ${env} --algorithm_name ${algo} --experiment_name ${arm}${exp_suffix} \
     --layout_name ${layout} --num_agents ${num_agents} \
     --seed ${seed} --n_training_threads $TRAINING_THREADS --n_rollout_threads $ROLLOUT_THREADS \
     --num_mini_batch ${num_mini_batch} --episode_length ${episode_length} \
@@ -146,6 +152,6 @@ do
     --cnn_layers_params "32,3,1,1 64,3,1,1 32,3,1,1" --use_recurrent_policy \
     --use_proper_time_limits \
     --save_interval 25 --log_interval 10 --use_eval --eval_interval 50 --eval_episodes 12 \
-    --wandb_tags morl-benchmark ${arm} \
+    --wandb_tags morl-benchmark ${arm}${exp_suffix} ${objectives} \
     --wandb_name $WANDB_ENTITY || exit 1
 done
