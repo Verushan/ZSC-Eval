@@ -148,6 +148,22 @@ def get_overcooked_args(parser: argparse.ArgumentParser) -> argparse.ArgumentPar
         "channels. Requires --use_morl.",
     )
     parser.add_argument(
+        "--morl_diminishing_alpha",
+        type=float,
+        default=1.0,
+        help="Diminishing returns on each objective: the step reward becomes the "
+        "marginal value of f(c) = c**alpha over the episode-to-date total, so the "
+        "three-hundredth counter handoff is worth far less than the first. 1.0 "
+        "(the default) is the plain event count and reproduces every run made "
+        "before this flag. Below 1 it blunts reward hacking -- on random0 the "
+        "coordination objective is farmable by putting an onion down and picking "
+        "it up, and at alpha 1.0 the scalarised reward prefers a hacker scoring "
+        "coordination 318 with zero deliveries over a cook scoring 72 with 8.8, "
+        "by a factor of 3.9. Note this is necessary but not sufficient: with "
+        "task_completion left at unit counts even alpha 0.5 still prefers the "
+        "hacker, because a delivery is worth 20 in the environment and 1 here.",
+    )
+    parser.add_argument(
         "--morl_reward_scale",
         type=float,
         default=1.0,

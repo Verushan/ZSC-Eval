@@ -56,6 +56,7 @@ class OvercookedEnv:
         num_initial_state: int = 5,
         replay_return_threshold: float = 0.75,
         objectives=None,
+        objective_diminishing_alpha=1.0,
     ):
         """
         mdp (OvercookedGridworld or function): either an instance of the MDP or a function that returns MDP instances
@@ -82,7 +83,9 @@ class OvercookedEnv:
         self.use_random_player_pos = use_random_player_pos
         self.use_random_terrain_state = use_random_terrain_state
         # NOTE: must be set before reset(), which resets the objective vector.
-        self.objectives = make_objective_vector(objectives)
+        self.objectives = make_objective_vector(
+            objectives, diminishing_alpha=objective_diminishing_alpha
+        )
         self.reset()
 
         if self.horizon >= MAX_HORIZON and self.state.order_list is None and debug:
@@ -565,6 +568,9 @@ class Overcooked(gym.Env):
             "replay_return_threshold": all_args.replay_return_threshold,
             # MORL: opt-in via --morl_objectives. Absent/None => scalar-reward
             "objectives": morl_objectives,
+            "objective_diminishing_alpha": getattr(
+                all_args, "morl_diminishing_alpha", 1.0
+            ),
         }
         self.mdp_fn = lambda: OvercookedGridworld.from_layout_name(**mdp_params)
         self.base_mdp = self.mdp_fn()

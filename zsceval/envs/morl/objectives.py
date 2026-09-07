@@ -360,17 +360,43 @@ class ObjectiveVector:
         >>> vec.proportions()           # (K,) -- the `g` of the Mirror Descent update
     """
 
-    def __init__(self, objectives: Sequence[Objective]):
+    def __init__(self, objectives: Sequence[Objective], diminishing_alpha: float = 1.0):
         if not objectives:
             raise ValueError("ObjectiveVector requires at least one objective")
+        if not 0.0 < diminishing_alpha <= 1.0:
+            raise ValueError(
+                f"diminishing_alpha must be in (0, 1], got {diminishing_alpha}"
+            )
         names = [o.name for o in objectives]
         duplicates = {n for n in names if names.count(n) > 1}
         if duplicates:
             raise ValueError(f"Duplicate objective names: {sorted(duplicates)}")
 
         self.objectives: List[Objective] = list(objectives)
+        # Diminishing returns. `alpha` 1.0 is the plain event count; below 1 the
+        # step reward becomes the marginal value of a concave function of the
+        # episode-to-date total, `f(c + d) - f(c)` with `f(x) = x**alpha`, so the
+        # three-hundredth handoff is worth far less than the first.
+        #
+        # This exists because raw counts are hackable. On random0 the
+        # `coordination` objective counts counter handoffs, and an agent can put
+        # an onion down and pick it up forever: bench_morl_div's plating+coord
+        # seed reached coordination 317.8 with a sparse return of 0, and two of
+        # bench_morl's six uniform-weight seeds did the same. The reward rises
+        # the whole time, so the failure is invisible from the training curve.
+        #
+        # It also repairs the preference vector. `w` multiplies raw counts, and
+        # on random0 coordination averages 18.5 against task_completion's 1.85 --
+        # so "uniform" w = 0.25 each gives coordination ten times the influence.
+        # Concavity compresses that: at alpha 0.5 a 10x count gap becomes 3.2x,
+        # which is what makes w mean roughly what it says.
+        self.diminishing_alpha = float(diminishing_alpha)
         self._num_players = 0
         self._cumulative = np.zeros((0, len(self.objectives)), dtype=np.float64)
+        # Raw counts, kept separately: `cumulative` stays the reported episode
+        # total in event units so `ep_obj_*` and the mirror-descent `g` term
+        # remain comparable with every run made before this existed.
+        self._raw_cumulative = np.zeros((0, len(self.objectives)), dtype=np.float64)
 
     # -- introspection ------------------------------------------------------
 
@@ -398,6 +424,9 @@ class ObjectiveVector:
         self._cumulative = np.zeros(
             (num_players, len(self.objectives)), dtype=np.float64
         )
+        self._raw_cumulative = np.zeros(
+            (num_players, len(self.objectives)), dtype=np.float64
+        )
         for objective in self.objectives:
             objective.reset(num_players)
 
@@ -422,7 +451,24 @@ class ObjectiveVector:
 
         step_reward = np.stack(columns, axis=-1)
         self._cumulative = self._cumulative + step_reward
-        return step_reward
+
+        if self.diminishing_alpha == 1.0:
+            self._raw_cumulative = self._cumulative
+            return step_reward
+
+        # Marginal value of the concave f over the episode-to-date raw total.
+        # Negative components (an objective may penalise) are passed through
+        # untransformed: f is defined for non-negative totals, and clamping the
+        # running total at zero keeps a penalty from being silently discounted
+        # by however much credit was banked before it.
+        alpha = self.diminishing_alpha
+        before = self._raw_cumulative
+        after = before + step_reward
+        marginal = np.sign(after) * np.abs(after) ** alpha - np.sign(
+            before
+        ) * np.abs(before) ** alpha
+        self._raw_cumulative = after
+        return marginal
 
     @property
     def cumulative(self) -> np.ndarray:
@@ -501,6 +547,7 @@ OBJECTIVE_SETS: Dict[str, List[str]] = {
 
 def make_objective_vector(
     spec: Optional[Union[str, Sequence[str], ObjectiveVector]] = None,
+    diminishing_alpha: float = 1.0,
 ) -> Optional[ObjectiveVector]:
     """Build an :class:`ObjectiveVector` from a flexible specification.
 
@@ -541,4 +588,6 @@ def make_objective_vector(
             f"Available: {sorted(OBJECTIVE_REGISTRY)}; sets: {sorted(OBJECTIVE_SETS)}"
         )
 
-    return ObjectiveVector([OBJECTIVE_REGISTRY[n]() for n in names])
+    return ObjectiveVector(
+        [OBJECTIVE_REGISTRY[n]() for n in names], diminishing_alpha=diminishing_alpha
+    )
