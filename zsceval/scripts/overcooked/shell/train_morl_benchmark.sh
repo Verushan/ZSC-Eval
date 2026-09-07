@@ -36,7 +36,10 @@ else
 fi
 
 # The objective vector, and the arm-specific reward wiring.
-objectives="default"
+# `default` is the original four-objective set. `anchored` swaps coordination
+# for the version credited only once a handed object is used -- the plain one
+# is farmable and six seeds found the loop, so new runs should use anchored.
+objectives=${OBJECTIVES:-default}
 case "${arm}" in
     bench_sp)
         morl_flags=(--morl_objectives ${objectives})
