@@ -344,6 +344,116 @@ class CounterHandoff(Objective):
         return reward
 
 
+class AnchoredCounterHandoff(CounterHandoff):
+    """Coordination quality, credited only once the handoff is *used*.
+
+    :class:`CounterHandoff` credits a handoff the instant the partner collects
+    the object, and that is farmable: the put and the pickup are exact inverses
+    that advance nothing, so two agents can pass an onion back and forth for the
+    whole episode. They do. On random0 the measured ratio of the best score
+    reached while delivering *nothing* to the median score reached while
+    delivering is 3.69 -- the objective is better farmed than earned -- and six
+    stage-1 seeds across two arms found it independently. The other three
+    objectives in the `default` set sit at 0.18, 0.03 and 0.00 on the same
+    measure, because each is gated behind an irreversible step.
+
+    This version restores that gate without giving up the thing coordination is
+    for. A handoff becomes a *pending* claim when the partner collects it, and
+    pays out only when the receiver commits the object to progress that cannot
+    be undone:
+
+        onion, tomato   ->  PLACEMENT_IN_POT
+        dish            ->  SOUP_PICKUP
+        soup            ->  delivery
+
+    and the claim is *cancelled* if the receiver instead puts the object back on
+    a counter. That is exactly the farming loop, so it now earns nothing, while
+    a genuine pass -- hand over an onion, partner pots it -- is credited in full.
+
+    Deferring the credit rather than dropping the objective matters: a purely
+    structural rule ("count only irreversible events") would delete coordination
+    altogether, and coordination is the one component that measures the thing
+    this project is about. The rule to take away is not *avoid* such objectives
+    but *anchor* them to an irreversible consequence.
+
+    An agent resolves one INTERACT per step, so placing, collecting and
+    anchoring are mutually exclusive for a given agent on a given step, and the
+    three branches below cannot race.
+    """
+
+    name = "coordination"
+    description = "Objects handed to the partner and then actually used."
+
+    #: What the receiver must do with a handed object for the claim to pay out.
+    ANCHOR_EVENTS = {
+        "onion": ("PLACEMENT_IN_POT",),
+        "tomato": ("PLACEMENT_IN_POT",),
+        "dish": ("SOUP_PICKUP",),
+        "soup": ("delivery",),
+    }
+
+    def __init__(self, scale: float = 1.0, credit_both: bool = True):
+        super().__init__(scale=scale, credit_both=credit_both)
+        self._pending: Dict[int, List[Any]] = {}
+
+    def reset(self, num_players: int) -> None:
+        super().reset(num_players)
+        self._pending = {i: [] for i in range(num_players)}
+
+    def _object_placed(self, context: ObjectiveContext, agent_idx: int):
+        for obj in self.OBJECT_NAMES:
+            if context.count(agent_idx, f"put_{obj}_on_X"):
+                return obj
+        return None
+
+    def _object_taken(self, context: ObjectiveContext, agent_idx: int):
+        for obj in self.OBJECT_NAMES:
+            if context.count(agent_idx, f"pickup_{obj}_from_X"):
+                return obj
+        return None
+
+    def __call__(self, context: ObjectiveContext) -> np.ndarray:
+        reward = np.zeros(context.num_players, dtype=np.float64)
+        if not self._pending:
+            self._pending = {i: [] for i in range(context.num_players)}
+
+        for agent_index in range(context.num_players):
+            placed = self._object_placed(context, agent_index)
+            took = self._object_taken(context, agent_index)
+
+            if placed is not None:
+                position = self._interact_position(context.prev_state, agent_index)
+                self._counter_owner[position] = agent_index
+                # Putting it straight back down is the farming loop, not a use.
+                for entry in list(self._pending[agent_index]):
+                    if entry[0] == placed:
+                        self._pending[agent_index].remove(entry)
+                        break
+                continue
+
+            if took is not None:
+                position = self._interact_position(context.prev_state, agent_index)
+                owner_index = self._counter_owner.pop(position, None)
+                if owner_index is not None and owner_index != agent_index:
+                    self._pending[agent_index].append((took, owner_index))
+                continue
+
+            # Neither placed nor collected: did this agent cash a claim in?
+            for entry in list(self._pending[agent_index]):
+                obj, giver = entry
+                if any(
+                    context.count(agent_index, event)
+                    for event in self.ANCHOR_EVENTS.get(obj, ())
+                ):
+                    reward[agent_index] += self.scale
+                    if self.credit_both:
+                        reward[giver] += self.scale
+                    self._pending[agent_index].remove(entry)
+                    break
+
+        return reward
+
+
 # ---------------------------------------------------------------------------
 # The vector
 # ---------------------------------------------------------------------------
@@ -521,6 +631,7 @@ OBJECTIVE_REGISTRY: Dict[str, Callable[[], Objective]] = {
     "ingredient_prep": IngredientPrep,
     "plating": Plating,
     "coordination": CounterHandoff,
+    "coordination_anchored": AnchoredCounterHandoff,
     "recipe_quality": RecipeQuality,
     "recipe_value": RecipeValue,
 }
@@ -529,6 +640,16 @@ OBJECTIVE_REGISTRY: Dict[str, Callable[[], Objective]] = {
 OBJECTIVE_SETS: Dict[str, List[str]] = {
     "default": ["task_completion", "ingredient_prep", "plating", "coordination"],
     "task_only": ["task_completion"],
+    # Same four objectives as `default`, with coordination credited only once
+    # the handed object is used. `default` is kept unchanged so every run made
+    # before the farming was found stays reproducible; `anchored` is what new
+    # runs should use.
+    "anchored": [
+        "task_completion",
+        "ingredient_prep",
+        "plating",
+        "coordination_anchored",
+    ],
     # Multi-recipe (`*_m`) layouts only. `default` plus the two objectives the
     # single-recipe env has no counters for. The events behind these are only
     # ever non-zero in `envs/overcooked_new`, so using this preset on an old
