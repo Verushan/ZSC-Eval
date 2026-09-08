@@ -673,6 +673,23 @@ OBJECTIVE_SETS: Dict[str, List[str]] = {
     # mass. Pricing one component 20x higher pushes `g` toward that vertex and
     # leaves the update less to do. That is a real cost for --morl_adaptive_weights
     # and no cost at all for fixed w, which is what bench_morl_div uses.
+    # For layouts where counter handoffs never happen. On unident_s the
+    # coordination component is identically 0.00 for every arm, so the four-way
+    # set spends a quarter of its preference mass on an objective that cannot
+    # fire.
+    #
+    # For a fixed w that is merely a scale factor -- the three live components
+    # stay equally weighted. For --morl_adaptive_weights it is a weight sink:
+    # the mirror-descent update is w_i <- w_i exp(eta (t_i - g_i)), and a
+    # component whose realised share g is permanently 0 against a target of 0.25
+    # has a permanently positive exponent, so its weight grows without bound
+    # while the live objectives are starved. That is the 0.286 the adaptive arm
+    # was observed parking on coordination.
+    "anchored_live3": [
+        "task_completion",
+        "ingredient_prep",
+        "plating",
+    ],
     "anchored_valued": [
         "task_completion_valued",
         "ingredient_prep",

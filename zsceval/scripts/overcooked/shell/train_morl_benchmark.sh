@@ -40,6 +40,15 @@ fi
 # for the version credited only once a handed object is used -- the plain one
 # is farmable and six seeds found the loop, so new runs should use anchored.
 objectives=${OBJECTIVES:-default}
+# Uniform w over however many objectives the set has. MORL_WEIGHTS overrides it.
+# The four-way literal was hardcoded, so a three-objective set would silently
+# have been handed a fourth weight for a component that does not exist.
+case "${objectives}" in
+    anchored_live3) uniform_w="0.3333,0.3333,0.3333" ;;
+    recipe)         uniform_w="0.1667,0.1667,0.1667,0.1667,0.1667,0.1667" ;;
+    *)              uniform_w="0.25,0.25,0.25,0.25" ;;
+esac
+uniform_w=${MORL_WEIGHTS:-$uniform_w}
 # Appended to the W&B experiment_name only, never to the arm. Runs made under
 # a different objective set must not share an experiment_name with the ones
 # they replace: extract_sp_models filters on experiment_name, so a re-baseline
@@ -54,10 +63,10 @@ case "${arm}" in
         morl_flags=(--use_morl --morl_objectives ${objectives} --morl_weights "20,0,0,0")
         ;;
     bench_morl)
-        morl_flags=(--use_morl --morl_objectives ${objectives} --morl_weights "0.25,0.25,0.25,0.25")
+        morl_flags=(--use_morl --morl_objectives ${objectives} --morl_weights "${uniform_w}")
         ;;
     bench_morl_ad)
-        morl_flags=(--use_morl --morl_objectives ${objectives} --morl_weights "0.25,0.25,0.25,0.25" --morl_adaptive_weights)
+        morl_flags=(--use_morl --morl_objectives ${objectives} --morl_weights "${uniform_w}" --morl_adaptive_weights)
         ;;
     bench_morl_div)
         # Weights are per-seed; set inside the loop below.
