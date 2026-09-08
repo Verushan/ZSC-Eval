@@ -28,11 +28,14 @@ arm=$2
 seed_begin=${3:-1}
 seed_max=${4:-3}
 
+# The objective layer exists in both env packages (see the MORL section of
+# CLAUDE.md), so the multi-recipe layouts train the same arms as the old ones.
+# This used to exit here, which meant the _m and _mx layouts had partners but
+# could never have ego agents to evaluate against them.
 if [[ "${layout}" == "random0" || "${layout}" == "random0_medium" || "${layout}" == "random1" || "${layout}" == "random3" || "${layout}" == "small_corridor" || "${layout}" == "unident_s" ]]; then
     version="old"
 else
-    echo "MORL is only supported on the old-env layouts, got '${layout}'"
-    exit 1
+    version="new"
 fi
 
 # The objective vector, and the arm-specific reward wiring.

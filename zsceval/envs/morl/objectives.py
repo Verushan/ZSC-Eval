@@ -701,11 +701,15 @@ OBJECTIVE_SETS: Dict[str, List[str]] = {
     # ever non-zero in `envs/overcooked_new`, so using this preset on an old
     # layout is not an error but leaves two components pinned at 0 -- which
     # the adaptive weight update will then happily pour weight into.
+    # coordination_anchored, not coordination: the plain one credits a handoff
+    # the moment the partner collects the object, which is farmable, and six
+    # seeds on random0 found the loop. A multi-recipe run on the plain set would
+    # simply reproduce that.
     "recipe": [
         "task_completion",
         "ingredient_prep",
         "plating",
-        "coordination",
+        "coordination_anchored",
         "recipe_quality",
         "recipe_value",
     ],
