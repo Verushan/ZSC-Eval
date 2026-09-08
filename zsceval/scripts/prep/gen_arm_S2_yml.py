@@ -50,6 +50,13 @@ ARM_POPULATIONS = {
     "bench_morl": ["bench_morl"],
     "bench_morl_ad": ["bench_morl_ad"],
     "mixed": ["bench_sp", "bench_morl_ad"],
+    # The anchored re-baseline. The originals optimised a farmable coordination
+    # objective, so every stage-2 result built on those populations measures
+    # reward hacking rather than MORL; these re-ask the question on a reward
+    # whose argmax is not a hack.
+    "bench_morl-anc": ["bench_morl-anc"],
+    "bench_morl_ad-anc": ["bench_morl_ad-anc"],
+    "bench_morl_div-anc": ["bench_morl_div-anc"],
 }
 
 HEADER = """\
