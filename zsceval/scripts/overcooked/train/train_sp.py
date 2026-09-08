@@ -141,8 +141,12 @@ def main(args):
         / all_args.algorithm_name
         / all_args.experiment_name
     )
-    if not run_dir.exists():
-        os.makedirs(str(run_dir))
+    # exist_ok, not test-then-create: concurrent seeds of one arm share this
+    # directory, and the loser of the race dies here -- before wandb.init(), so
+    # it leaves no run at all, only a traceback in its own log. Two tasks of the
+    # bench_morl_div array died exactly this way. The same fix was already
+    # applied to train_bias_agent.py for the same reason.
+    os.makedirs(str(run_dir), exist_ok=True)
     all_args.run_dir = run_dir
 
     # wandb
@@ -182,7 +186,7 @@ def main(args):
                 curr_run = "run%i" % (max(exst_run_nums) + 1)
         run_dir = run_dir / curr_run
         if not run_dir.exists():
-            os.makedirs(str(run_dir))
+            os.makedirs(str(run_dir), exist_ok=True)
 
     setproctitle.setproctitle(
         str(all_args.algorithm_name)
