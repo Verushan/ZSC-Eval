@@ -70,6 +70,21 @@ def pid_flags(dim):
     return ["--use_agent_policy_id_obs", "--agent_policy_id_obs_dim", str(dim)]
 
 
+def morl_obs_flags(objective_set):
+    """Flags for an actor that sees its own live preference vector.
+
+    `--use_morl_obs_weights` appends w to the observation as K constant
+    channels, so the width depends on how many objectives the set has and a
+    policy trained with it cannot load a config written without it.
+    """
+    return [
+        "--use_morl",
+        "--morl_objectives",
+        objective_set,
+        "--use_morl_obs_weights",
+    ]
+
+
 def build(layout, extra):
     """The 4-tuple `base_runner` pickles, without running a base_runner."""
     version = "old" if layout in OLD_LAYOUTS else "new"
@@ -126,6 +141,16 @@ def main():
         "from. Repeatable via separate invocations, one per rung width.",
     )
     parser.add_argument(
+        "--morl_obs_weights",
+        default=None,
+        metavar="OBJECTIVE_SET",
+        help="Write configs for an actor that sees its own live preference "
+        "vector, as `{mlp,rnn}_policy_config_mow-{SET}.pkl`. The named objective "
+        "set fixes K and so the observation width -- `anchored` gives four extra "
+        "channels, `anchored_live3` three. Needed to cross-play a "
+        "bench_morl_ad_obs agent, which cannot load the shared config.",
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Replace a config that already exists. Off by default: every policy "
@@ -137,7 +162,13 @@ def main():
     assert POLICY_POOL_DIR, "POLICY_POOL is unset; source .env first"
 
     configs = dict(CONFIGS)
-    if args.pid_obs_dim is not None:
+    if args.morl_obs_weights:
+        extra = morl_obs_flags(args.morl_obs_weights)
+        configs = {
+            name.replace(".pkl", f"_mow-{args.morl_obs_weights}.pkl"): base + extra
+            for name, base in CONFIGS.items()
+        }
+    elif args.pid_obs_dim is not None:
         extra = pid_flags(args.pid_obs_dim)
         configs = {
             name.replace(".pkl", f"_pid{args.pid_obs_dim}.pkl"): base + extra

@@ -71,12 +71,30 @@ case "${arm}" in
     bench_morl_ad)
         morl_flags=(--use_morl --morl_objectives ${objectives} --morl_weights "${uniform_w}" --morl_adaptive_weights)
         ;;
+    bench_morl_ad_obs)
+        # Adaptive w, with the live w appended to the observation.
+        #
+        # The mirror-descent update moves w mid-episode while the agent has no
+        # way to see that it moved, so two identical observations carry
+        # different returns -- the reward is non-Markovian and the agent is
+        # being asked to adapt to a signal it cannot perceive.
+        # --use_morl_obs_weights appends w as K constant channels and restores
+        # the Markov property. It has never been used in a benchmark arm, so
+        # every adaptive result so far is from the version that cannot see its
+        # own preferences.
+        #
+        # It widens the observation, so these agents need their own policy
+        # config (prep/store_policy_config.py --morl_obs_weights) and cannot
+        # load the shared one. env_policy trims each frozen partner back to the
+        # width it was built for.
+        morl_flags=(--use_morl --morl_objectives ${objectives} --morl_weights "${uniform_w}" --morl_adaptive_weights --use_morl_obs_weights)
+        ;;
     bench_morl_div)
         # Weights are per-seed; set inside the loop below.
         morl_flags=()
         ;;
     *)
-        echo "Unknown arm '${arm}'. Expected one of bench_sp bench_sparse bench_morl bench_morl_ad bench_morl_div"
+        echo "Unknown arm '${arm}'. Expected one of bench_sp bench_sparse bench_morl bench_morl_ad bench_morl_ad_obs bench_morl_div"
         exit 1
         ;;
 esac
