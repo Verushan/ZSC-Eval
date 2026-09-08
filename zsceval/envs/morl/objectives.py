@@ -632,6 +632,9 @@ OBJECTIVE_REGISTRY: Dict[str, Callable[[], Objective]] = {
     "plating": Plating,
     "coordination": CounterHandoff,
     "coordination_anchored": AnchoredCounterHandoff,
+    # task_completion priced at the environment's own delivery reward rather
+    # than counted. See the `anchored_valued` preset for why.
+    "task_completion_valued": lambda: TaskCompletion(scale=20.0),
     "recipe_quality": RecipeQuality,
     "recipe_value": RecipeValue,
 }
@@ -646,6 +649,32 @@ OBJECTIVE_SETS: Dict[str, List[str]] = {
     # runs should use.
     "anchored": [
         "task_completion",
+        "ingredient_prep",
+        "plating",
+        "coordination_anchored",
+    ],
+    # `anchored`, with deliveries priced at what the environment pays for them.
+    #
+    # Counting a delivery as 1 makes w uninterpretable, because the components
+    # are not commensurate: on random0 a delivering agent reaches roughly
+    # task 7, ingredient_prep 23, plating 14, coordination 60 per episode. So
+    # w = (0.25, 0.75, 0, 0) -- nominally a quarter of the preference on
+    # finishing the task -- actually pays 1.75 for deliveries against 17.25 for
+    # potting, and the agent correctly optimises potting. bench_morl_div's
+    # prep-weighted members scored 0 sparse for exactly this reason, and
+    # anchoring did not help them because their failure was never farming.
+    #
+    # scale=20 is the MDP's own delivery_reward, so the component is the sparse
+    # reward it already represents rather than an arbitrary constant.
+    #
+    # Caveat, and the reason `anchored` keeps unit counts: the module's
+    # non-negativity and commensurate-magnitude invariants exist for the
+    # mirror-descent update, whose `g` is a proportion of realised objective
+    # mass. Pricing one component 20x higher pushes `g` toward that vertex and
+    # leaves the update less to do. That is a real cost for --morl_adaptive_weights
+    # and no cost at all for fixed w, which is what bench_morl_div uses.
+    "anchored_valued": [
+        "task_completion_valued",
         "ingredient_prep",
         "plating",
         "coordination_anchored",
