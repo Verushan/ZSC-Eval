@@ -174,6 +174,13 @@ if __name__ == "__main__":
         "random0_m",
         "random1_m",
         "random3_m",
+        "unident_s_m",
+        # Mixed-incentive variants: same grids as the _m layouts, priced so that
+        # using both ingredients pays.
+        "random0_mx",
+        "random1_mx",
+        "random3_mx",
+        "unident_s_mx",
         "academy_3_vs_1_with_keeper",
         "all",
     ], layout
